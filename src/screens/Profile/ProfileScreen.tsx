@@ -55,6 +55,22 @@ export default function ProfileScreen({}: Props) {
     setMobile(value.replace(/\D/g, '').slice(0, 10));
   }, []);
 
+  const resetFormFromProfile = useCallback(() => {
+    if (!profile) return;
+    setName(profile.name);
+    setGender(profile.gender);
+    setMobile(profile.mobile);
+    setAddress(profile.address);
+    setCity(profile.city);
+    setAvatarUrl(profile.avatarUrl);
+    setErrors({});
+  }, [profile]);
+
+  const onCancelEdit = useCallback(() => {
+    resetFormFromProfile();
+    setEditing(false);
+  }, [resetFormFromProfile]);
+
   const onSave = useCallback(async () => {
     if (!userId || !gender) return;
 
@@ -92,14 +108,14 @@ export default function ProfileScreen({}: Props) {
   const onLogout = useCallback(async () => {
     try {
       setLoggingOut(true);
-      await performLogout(dispatch, userId);
+      await performLogout(dispatch);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Logout failed';
       showToast({message, type: 'error'});
     } finally {
       setLoggingOut(false);
     }
-  }, [dispatch, userId]);
+  }, [dispatch]);
 
   if (!profile) {
     return (
@@ -201,13 +217,15 @@ export default function ProfileScreen({}: Props) {
             <AppButton title="Save Changes" onPress={onSave} loading={saving} />
             <AppButton
               title="Cancel"
-              onPress={() => setEditing(false)}
+              onPress={onCancelEdit}
               variant="secondary"
               style={styles.cancelButton}
             />
           </>
         ) : (
           <>
+            <InfoRow label="Full Name" value={profile.name} colors={colors} />
+            <InfoRow label="Email" value={profile.email} colors={colors} />
             <InfoRow label="Gender" value={profile.gender} colors={colors} />
             <InfoRow label="Mobile" value={profile.mobile} colors={colors} />
             <InfoRow label="Address" value={profile.address} colors={colors} />
@@ -246,7 +264,14 @@ function InfoRow({
   return (
     <View style={styles.infoRow}>
       <Text style={[styles.infoLabel, {color: colors.textSecondary}]}>{label}</Text>
-      <Text style={[styles.infoValue, {color: colors.text}]}>{value}</Text>
+      <Text
+        style={[
+          styles.infoValue,
+          {color: colors.text},
+          label === 'Gender' && styles.capitalize,
+        ]}>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -335,6 +360,8 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: 16,
     fontWeight: '500',
+  },
+  capitalize: {
     textTransform: 'capitalize',
   },
   editButton: {

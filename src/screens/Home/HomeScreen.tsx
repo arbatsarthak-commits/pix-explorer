@@ -20,174 +20,99 @@ import ErrorState from '../../components/ErrorState';
 import ImageCard from '../../components/ImageCard';
 import ScreenContainer from '../../components/ScreenContainer';
 import SkeletonLoader from '../../components/SkeletonLoader';
-import {useDebounce} from '../../hooks/useDebounce';
-import {useNetwork} from '../../hooks/useNetwork';
+import {useImagePagination} from '../../hooks/useImagePagination';
 import {
   addFavorite,
   removeFavorite,
 } from '../../redux/slices/favoritesSlice';
-import {
-  appendImages,
-  clearImages,
-  setHasMore,
-  setPage,
-} from '../../redux/slices/imagesSlice';
 import type {AppDispatch, RootState} from '../../redux/store';
-import {saveFavorites} from '../../services/favoritesStorage';
-import {fetchPicsumImages} from '../../services/imagesApi';
 import {useTheme} from '../../theme/ThemeContext';
 import type {ImageItem} from '../../types/image';
+import {
+  type AuthorRangeFilter,
+  filterImages,
+  hasActiveImageFilter,
+} from '../../utils/imageFilters';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
-type AuthorRangeFilter = 'all' | 'am' | 'nz';
-
-const PAGE_SIZE = 20;
 const ITEM_HEIGHT = 252;
 const MIN_FILTERED_ITEMS = 8;
-
-function normalize(s: string) {
-  return s.trim().toLowerCase();
-}
-
-function authorRangeForFilter(author: string, filter: AuthorRangeFilter) {
-  if (filter === 'all') return true;
-  const first = normalize(author).charAt(0).toUpperCase();
-  if (!first) return false;
-  const code = first.charCodeAt(0);
-  const isAM = code >= 65 && code <= 77;
-  return filter === 'am' ? isAM : !isAM;
-}
-
-function matchesSearch(item: ImageItem, query: string) {
-  const q = normalize(query);
-  if (!q) return true;
-  return (
-    normalize(item.author).includes(q) || normalize(item.id).includes(q)
-  );
-}
 
 export default function HomeScreen({navigation}: Props) {
   const dispatch = useDispatch<AppDispatch>();
   const {colors} = useTheme();
-  const {isConnected} = useNetwork();
 
-  const userId = useSelector((s: RootState) => s.auth.userId);
-  const {items, hasMore, page} = useSelector((s: RootState) => s.images);
-  const {favoriteImageIds, favoriteMetadata} = useSelector(
-    (s: RootState) => s.favorites,
-  );
+  const {favoriteImageIds} = useSelector((s: RootState) => s.favorites);
+  const {
+    items,
+    hasMore,
+    loading,
+    refreshing,
+    errorMessage,
+    isConnected,
+    refresh,
+    loadMore,
+    retry,
+    inFlightRef,
+  } = useImagePagination();
 
   const [query, setQuery] = useState('');
-  const debouncedQuery = useDebounce(query, 300);
   const [filter, setFilter] = useState<AuthorRangeFilter>('all');
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const favoriteSet = useMemo(
     () => new Set(favoriteImageIds),
     [favoriteImageIds],
   );
 
-  useEffect(() => {
-    if (!userId) return;
-    saveFavorites(userId, favoriteImageIds, favoriteMetadata).catch(() => {});
-  }, [userId, favoriteImageIds, favoriteMetadata]);
-
-  const filteredItems = useMemo(() => {
-    return items
-      .filter(i => matchesSearch(i, debouncedQuery))
-      .filter(i => authorRangeForFilter(i.author, filter));
-  }, [debouncedQuery, filter, items]);
-
-  const hasActiveFilter = filter !== 'all' || normalize(debouncedQuery).length > 0;
-
-  const fetchImages = useCallback(
-    async (nextPage: number, reset: boolean) => {
-      if (!isConnected) {
-        setErrorMessage('No internet connection. Please check your network.');
-        return;
-      }
-
-      try {
-        setErrorMessage(null);
-        if (reset) {
-          dispatch(clearImages());
-        }
-
-        const data = await fetchPicsumImages({page: nextPage, limit: PAGE_SIZE});
-        dispatch(appendImages(data));
-        dispatch(setPage(nextPage));
-        dispatch(setHasMore(data.length === PAGE_SIZE));
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : 'Failed to load images';
-        setErrorMessage(msg);
-      }
-    },
-    [dispatch, isConnected],
+  const filteredItems = useMemo(
+    () => filterImages(items, query, filter),
+    [items, query, filter],
   );
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        await fetchImages(1, true);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [fetchImages]);
+  const activeFilter = hasActiveImageFilter(query, filter);
+
+  const tryLoadMore = useCallback(async () => {
+    if (inFlightRef.current || !hasMore || refreshing) return;
+    setLoadingMore(true);
+    try {
+      await loadMore();
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [hasMore, inFlightRef, loadMore, refreshing]);
 
   useEffect(() => {
-    if (!hasActiveFilter || loading || refreshing || !hasMore || !isConnected) {
+    if (!activeFilter || !hasMore || loading || refreshing || loadingMore) {
       return;
     }
     if (filteredItems.length >= MIN_FILTERED_ITEMS) return;
 
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      try {
-        await fetchImages(page + 1, false);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    tryLoadMore();
   }, [
-    fetchImages,
+    activeFilter,
     filteredItems.length,
-    hasActiveFilter,
+    hasMore,
+    loading,
+    loadingMore,
+    refreshing,
+    tryLoadMore,
+  ]);
+
+  const onEndReached = useCallback(() => {
+    if (loading || refreshing || loadingMore || !hasMore || !isConnected) {
+      return;
+    }
+    tryLoadMore();
+  }, [
     hasMore,
     isConnected,
     loading,
-    page,
+    loadingMore,
     refreshing,
+    tryLoadMore,
   ]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await fetchImages(1, true);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [fetchImages]);
-
-  const onRetry = useCallback(() => {
-    setLoading(true);
-    fetchImages(1, true).finally(() => setLoading(false));
-  }, [fetchImages]);
-
-  const onEndReached = useCallback(() => {
-    if (loading || refreshing || !hasMore || !isConnected) return;
-    setLoading(true);
-    fetchImages(page + 1, false).finally(() => setLoading(false));
-  }, [fetchImages, hasMore, isConnected, loading, page, refreshing]);
 
   const toggleFavorite = useCallback(
     (item: ImageItem) => {
@@ -246,6 +171,9 @@ export default function HomeScreen({navigation}: Props) {
     );
   }, [errorMessage, loading]);
 
+  const showFooterLoader =
+    (loadingMore || (loading && items.length > 0)) && hasMore;
+
   return (
     <ScreenContainer keyboardAvoiding={false} style={styles.screen}>
       <AppHeader title="Image Gallery" activeRoute="Home" />
@@ -287,7 +215,13 @@ export default function HomeScreen({navigation}: Props) {
       {loading && items.length === 0 && !errorMessage ? (
         <SkeletonLoader count={5} />
       ) : errorMessage && items.length === 0 ? (
-        <ErrorState message={errorMessage} onRetry={onRetry} />
+        <ErrorState
+          message={errorMessage}
+          onRetry={() => {
+            setLoadingMore(true);
+            retry().finally(() => setLoadingMore(false));
+          }}
+        />
       ) : (
         <FlatList
           data={filteredItems}
@@ -299,10 +233,10 @@ export default function HomeScreen({navigation}: Props) {
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={listEmpty}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} />
           }
           ListFooterComponent={
-            loading && hasMore ? (
+            showFooterLoader ? (
               <View style={styles.footer}>
                 <ActivityIndicator color={colors.primary} />
               </View>

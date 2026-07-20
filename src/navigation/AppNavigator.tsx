@@ -12,6 +12,7 @@ import {loadAuthSession} from '../services/authStorage';
 import {loadFavorites} from '../services/favoritesStorage';
 import {loadUserProfile} from '../services/profileStorage';
 import {useTheme} from '../theme/ThemeContext';
+import {useFavoritesPersistence} from '../hooks/useFavoritesPersistence';
 import RegisterScreen from '../screens/Register/RegisterScreen';
 import LoginScreen from '../screens/Login/LoginScreen';
 import HomeScreen from '../screens/Home/HomeScreen';
@@ -24,6 +25,8 @@ import type {RootStackParamList} from './types';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function AuthenticatedStack() {
+  useFavoritesPersistence();
+
   return (
     <Stack.Navigator
       screenOptions={{headerShown: false, animation: 'slide_from_right'}}>

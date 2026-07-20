@@ -31,14 +31,8 @@ export default function ImageDetailsScreen({navigation, route}: Props) {
   const onDownload = useCallback(async () => {
     try {
       setDownloading(true);
-      const result = await downloadImageToGallery(url);
-      showToast({
-        message:
-          result === 'saved'
-            ? 'Image saved to gallery'
-            : 'Could not save to gallery. Image link shared instead.',
-        type: 'success',
-      });
+      await downloadImageToGallery(url);
+      showToast({message: 'Image saved to gallery', type: 'success'});
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Download failed';
       showToast({message, type: 'error'});
